@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Health Insights Doomsday Clock</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Custom styles for the Inter font and overall look */
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #1a202c; /* Dark background */
+            color: #e2e8f0; /* Light text */
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            overflow: hidden; /* Prevent scrollbars */
+        }
+        .container {
+            max-width: 90%;
+            width: 500px; /* Fixed width for the main content */
+            /* Ensure the container is a flex column to stack items */
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .button {
+            padding: 12px 24px;
+            border-radius: 9999px; /* Fully rounded buttons */
+            font-weight: bold;
+            cursor: pointer;
+            transition: background-color 0.3s ease, transform 0.1s ease;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3); /* Button shadow */
+        }
+        .button:hover {
+            transform: translateY(-2px); /* Slight lift on hover */
+        }
+        .button:active {
+            transform: translateY(0); /* Press effect */
+        }
+        .new-structure-button {
+            background-color: #38a169; /* Green button */
+            color: white;
+        }
+        .new-structure-button:hover {
+            background-color: #2f855a;
+        }
+        .defacto-button {
+            background-color: #4299e1; /* Blue button */
+            color: white;
+        }
+        .defacto-button:hover {
+            background-color: #3182ce;
+        }
+        .reset-button {
+            background-color: #e53e3e; /* Red button for reset */
+            color: white;
+        }
+        .reset-button:hover {
+            background-color: #c53030;
+        }
+        .target-text {
+            font-size: 2.5rem; /* Larger font size for the target text */
+            font-weight: bold;
+            text-align: center;
+            margin-top: 2rem;
+            color: #fbd38d; /* Gold-like color for the target text */
+            text-shadow: 0 0 10px rgba(251, 211, 141, 0.6); /* Glow effect */
+        }
+        .clock-display {
+            font-size: 1.5rem;
+            font-weight: bold;
+            text-align: center;
+            margin-bottom: 1rem;
+            color: #a0aec0; /* Lighter grey for clock display */
+        }
+        canvas {
+            background-color: #2d3748; /* Darker background for the clock face */
+            display: block;
+            margin: 2rem auto; /* Center the canvas */
+            box-shadow: 0 0 20px rgba(0, 0, 0, 0.5); /* Shadow for depth */
+        }
+    </style>
+</head>
+<body>
+    <div class="container bg-gray-800 p-8 rounded-xl shadow-2xl flex flex-col items-center space-y-8">
+        <h1 class="text-4xl font-extrabold text-center mb-4 text-red-500">Health Insights Doomsday Clock</h1>
+
+        <div class="clock-display" id="clock-display">0%</div>
+
+        <!-- Canvas for the actual clock -->
+        <canvas id="doomsday-clock" class="block mx-auto rounded-full border-2 border-gray-600 shadow-lg"></canvas>
+
+        <div class="flex flex-col sm:flex-row space-y-4 sm:space-y-0 sm:space-x-4 w-full justify-center">
+            <button id="new-structure-btn" class="button new-structure-button">New structure</button>
+            <button id="defacto-btn" class="button defacto-button">defacto</button>
+            <button id="reset-btn" class="button reset-button">Reset</button>
+        </div>
+
+        <p class="target-text" dir="rtl">شكلنا هننضف</p>
+    </div>
+
+    <script>
+        // Get references to DOM elements
+        const clockDisplay = document.getElementById('clock-display');
+        const newStructureBtn = document.getElementById('new-structure-btn');
+        const defactoBtn = document.getElementById('defacto-btn');
+        const resetBtn = document.getElementById('reset-btn'); // New reset button
+        const canvas = document.getElementById('doomsday-clock');
+        const ctx = canvas.getContext('2d');
+
+        // Initialize clock progress. 0% corresponds to 7 o'clock.
+        let currentProgress = 0;
+        const MAX_PROGRESS = 99; // The clock never reaches 100% (midnight)
+
+        // Define angular positions for 7 o'clock and 12 o'clock
+        // 7 o'clock: -Math.PI/2 (12 o'clock) - 5 hours * (2*Math.PI/12) = -4*Math.PI/3 radians
+        const START_ANGLE = -4 * Math.PI / 3;
+        // 12 o'clock: -Math.PI/2 radians
+        const MIDNIGHT_ANGLE = -Math.PI / 2;
+
+        // Define a small epsilon to ensure it never truly reaches midnight
+        const EPSILON_ANGLE = (2 * Math.PI / 360) * 0.5; // 0.5 degree before 12 o'clock
+        const TARGET_END_ANGLE = MIDNIGHT_ANGLE - EPSILON_ANGLE;
+
+        // The total angular range the hand will sweep
+        const ANGLE_SWEEP_RANGE = TARGET_END_ANGLE - START_ANGLE;
+
+        // Explosion effect variables
+        let isExploding = false;
+        let explosionFrame = 0;
+        const EXPLOSION_DURATION = 90; // Frames for the explosion animation (approx 1.5 seconds at 60fps)
+        const MAX_EXPLOSION_RADIUS_FACTOR = 2.0; // Max radius relative to clock radius (2x the clock radius)
+        const NUM_EXPLOSION_CIRCLES = 5; // More circles for a denser effect
+
+        // Load the background image
+        const backgroundImage = new Image();
+        backgroundImage.src = 'https://health-insights.com/images/icon2.svg';
+        // Fallback for image loading errors
+        backgroundImage.onerror = () => {
+            console.error('Failed to load background image.');
+            // If image fails to load, ensure drawClock still runs
+            drawClock();
+        };
+
+        /**
+         * Resizes the canvas to be square and fit its parent container's width.
+         * Then redraws the clock.
+         */
+        function resizeCanvas() {
+            const containerWidth = canvas.parentElement.clientWidth;
+            // Set canvas dimensions to be square, relative to container width, with a max size
+            const size = Math.min(containerWidth * 0.8, 400); // Max 400px, 80% of container
+            canvas.width = size;
+            canvas.height = size;
+            // No need to call drawClock here, it will be called by the animation loop
+        }
+
+        /**
+         * Draws the doomsday clock on the canvas.
+         * Includes the clock face, ticks, and the single doomsday hand.
+         */
+        function drawClock() {
+            // Clear the canvas before redrawing
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            const centerX = canvas.width / 2;
+            const centerY = canvas.height / 2;
+            const radius = Math.min(centerX, centerY) * 0.8; // Radius for the clock face
+
+            // Draw the background image if loaded
+            if (backgroundImage.complete && backgroundImage.naturalWidth > 0) {
+                // Calculate new dimensions for 50% size relative to the canvas size, not original image size
+                // We want the image to be 50% of the clock's diameter, so it's centered and smaller
+                const targetImgSize = radius * 1.0; // Make it roughly the size of the clock face
+                const imgWidth = targetImgSize;
+                const imgHeight = targetImgSize * (backgroundImage.naturalHeight / backgroundImage.naturalWidth); // Maintain aspect ratio
+
+                // Center the image on the canvas
+                const imgX = centerX - imgWidth / 2;
+                const imgY = centerY - imgHeight / 2;
+
+                ctx.drawImage(backgroundImage, imgX, imgY, imgWidth, imgHeight);
+            } else {
+                // Fallback: Draw clock face background if image not loaded
+                ctx.fillStyle = '#2d3748';
+                ctx.beginPath();
+                ctx.arc(centerX, centerY, radius, 0, 2 * Math.PI);
+                ctx.fill();
+            }
+
+            // Draw clock outer circle
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, radius, 0, 2 * Math.PI);
+            ctx.strokeStyle = '#4a5568'; // Darker grey border
+            ctx.lineWidth = 4;
+            ctx.stroke();
+
+            // Draw major ticks (e.g., at 12, 3, 6, 9 o'clock positions)
+            const tickLength = radius * 0.1;
+            ctx.strokeStyle = '#a0aec0'; // Lighter grey for ticks
+            ctx.lineWidth = 2;
+
+            for (let i = 0; i < 12; i++) {
+                // Calculate angle for each tick (starting from 12 o'clock, which is -Math.PI/2)
+                const tickAngle = (i / 12) * (2 * Math.PI) - Math.PI / 2;
+                const tickStartX = centerX + (radius - tickLength) * Math.cos(tickAngle);
+                const tickStartY = centerY + (radius - tickLength) * Math.sin(tickAngle);
+                let tickEndX = centerX + radius * Math.cos(tickAngle);
+                let tickEndY = centerY + radius * Math.sin(tickAngle);
+
+                // Make 12 o'clock tick more prominent
+                if (i === 0) { // 0 represents 12 o'clock
+                    ctx.strokeStyle = '#ef4444'; // Red for 12 o'clock
+                    ctx.lineWidth = 4;
+                    // Make the 12 o'clock tick slightly longer
+                    tickEndX = centerX + radius * 1.05 * Math.cos(tickAngle);
+                    tickEndY = centerY + radius * 1.05 * Math.sin(tickAngle);
+                } else {
+                    ctx.strokeStyle = '#a0aec0';
+                    ctx.lineWidth = 2;
+                }
+
+                ctx.beginPath();
+                ctx.moveTo(tickStartX, tickStartY);
+                ctx.lineTo(tickEndX, tickEndY);
+                ctx.stroke();
+            }
+
+            // Draw numbers for 7 and 12 o'clock
+            ctx.fillStyle = '#e2e8f0'; // Light text color
+            ctx.font = `${radius * 0.15}px Arial`; // Font size relative to radius
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+
+            // 12 o'clock position (top center)
+            const twelveAngle = -Math.PI / 2;
+            const twelveX = centerX + radius * 0.75 * Math.cos(twelveAngle);
+            const twelveY = centerY + radius * 0.75 * Math.sin(twelveAngle);
+            ctx.fillText('12', twelveX, twelveY);
+
+            // 7 o'clock position (5 hours counter-clockwise from 12)
+            const sevenAngle = -Math.PI / 2 - (5 * (2 * Math.PI / 12));
+            const sevenX = centerX + radius * 0.75 * Math.cos(sevenAngle);
+            const sevenY = centerY + radius * 0.75 * Math.sin(sevenAngle);
+            ctx.fillText('7', sevenX, sevenY);
+
+
+            // Calculate hand angle based on currentProgress with easing
+            // normalizedProgress goes from 0 to 1
+            const normalizedProgress = currentProgress / MAX_PROGRESS;
+            // Use an easing function (e.g., sine ease-out) to make movement slower towards the end
+            // Math.sin(x * Math.PI / 2) makes the rate of change decrease as x approaches 1
+            const easedProgress = Math.sin(normalizedProgress * Math.PI / 2);
+
+            // Calculate the actual hand angle
+            const handAngle = START_ANGLE + easedProgress * ANGLE_SWEEP_RANGE;
+            const handLength = radius * 0.7; // Length of the doomsday hand
+
+            // Calculate hand end point
+            const handX = centerX + handLength * Math.cos(handAngle);
+            const handY = centerY + handLength * Math.sin(handAngle);
+
+            // Draw the doomsday hand
+            ctx.beginPath();
+            ctx.moveTo(centerX, centerY); // Start from the center
+            ctx.lineTo(handX, handY);     // Draw to the calculated end point
+            ctx.strokeStyle = '#ef4444'; // Red color for the hand
+            ctx.lineWidth = 6;           // Thicker hand
+            ctx.lineCap = 'round';       // Rounded end for the hand
+            ctx.stroke();
+
+            // Draw the center pivot point
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, 8, 0, 2 * Math.PI); // Small circle at the center
+            ctx.fillStyle = '#ef4444'; // Red color for the pivot
+            ctx.fill();
+
+            // Draw explosion effect if triggered
+            if (isExploding) {
+                explosionFrame++;
+                const progress = explosionFrame / EXPLOSION_DURATION;
+
+                if (progress < 1) {
+                    ctx.save(); // Save current canvas state
+                    ctx.globalAlpha = 1 - progress; // Fade out effect
+
+                    // Draw multiple expanding circles for a "nuke" effect
+                    for (let i = 0; i < NUM_EXPLOSION_CIRCLES; i++) {
+                        // Staggered radii and colors
+                        const explosionRadius = (canvas.width * MAX_EXPLOSION_RADIUS_FACTOR) * (progress + i * 0.05); // Expand beyond clock
+                        let color = `rgba(255, 165, 0, ${ctx.globalAlpha})`; // Orange
+                        if (i % 2 === 0) {
+                            color = `rgba(255, 255, 0, ${ctx.globalAlpha})`; // Yellow
+                        } else if (i % 3 === 0) {
+                            color = `rgba(255, 69, 0, ${ctx.globalAlpha})`; // Red-orange
+                        }
+
+                        ctx.beginPath();
+                        ctx.arc(centerX, centerY, explosionRadius, 0, 2 * Math.PI);
+                        ctx.strokeStyle = color;
+                        ctx.lineWidth = 4 + (NUM_EXPLOSION_CIRCLES - i); // Thicker lines for inner circles
+                        ctx.stroke();
+                    }
+                    ctx.restore(); // Restore canvas state
+                } else {
+                    isExploding = false; // End explosion animation
+                    explosionFrame = 0;
+                }
+            }
+        }
+
+        /**
+         * Updates the visual representation of the clock and percentage display.
+         * Calls drawClock to render the current state.
+         */
+        function updateClockDisplay() {
+            clockDisplay.textContent = `${currentProgress}%`;
+            // No need to call drawClock here as it's handled by the animation loop
+        }
+
+        /**
+         * Event listener for the "New structure" button.
+         * Increments the clock progress, but never exceeds MAX_PROGRESS.
+         */
+        newStructureBtn.addEventListener('click', () => {
+            if (currentProgress < MAX_PROGRESS) {
+                currentProgress += 5; // Increment by 5%
+                if (currentProgress >= MAX_PROGRESS) { // Use >= to trigger explosion when it hits MAX_PROGRESS
+                    currentProgress = MAX_PROGRESS; // Cap at MAX_PROGRESS
+                    isExploding = true; // Trigger explosion
+                    explosionFrame = 0; // Reset explosion animation frame
+                }
+                updateClockDisplay();
+            }
+        });
+
+        /**
+         * Event listener for the "defacto" button.
+         * Decrements the clock progress, but never goes below 0.
+         */
+        defactoBtn.addEventListener('click', () => {
+            if (currentProgress > 0) {
+                currentProgress -= 5; // Decrement by 5%
+                if (currentProgress < 0) {
+                    currentProgress = 0; // Cap at 0
+                }
+                updateClockDisplay();
+            }
+        });
+
+        /**
+         * Event listener for the "Reset" button.
+         * Instantly resets the clock progress back to 0 (7 o'clock).
+         */
+        resetBtn.addEventListener('click', () => {
+            currentProgress = 0; // Reset to 0% (7 o'clock)
+            isExploding = false; // Ensure explosion is off if reset during animation
+            explosionFrame = 0;
+            updateClockDisplay();
+        });
+
+        /**
+         * Main animation loop.
+         * Continuously draws the clock and any active animations.
+         */
+        function animate() {
+            drawClock();
+            requestAnimationFrame(animate);
+        }
+
+        // Initial setup
+        window.addEventListener('load', () => {
+            resizeCanvas(); // Set initial canvas size
+            updateClockDisplay(); // Update display and draw clock (starts at 0%, which is 7 o'clock)
+            // Start the animation loop after the image is loaded
+            if (backgroundImage.complete && backgroundImage.naturalWidth > 0) {
+                animate();
+            } else {
+                backgroundImage.onload = () => {
+                    animate();
+                };
+            }
+        });
+        window.addEventListener('resize', resizeCanvas); // Adjust canvas size on window resize
+    </script>
+</body>
+</html>
